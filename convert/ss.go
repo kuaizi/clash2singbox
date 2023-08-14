@@ -6,23 +6,49 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/xmdhs/clash2singbox/clash"
-	"github.com/xmdhs/clash2singbox/singbox"
+	"github.com/xmdhs/clash2singbox/model/clash"
+	"github.com/xmdhs/clash2singbox/model/singbox"
 	"gopkg.in/yaml.v3"
 )
 
-func ss(p *clash.Proxies, s *singbox.SingBoxOut) error {
+func ss(p *clash.Proxies, s *singbox.SingBoxOut) ([]singbox.SingBoxOut, error) {
 	s.Method = p.Cipher
 	if !p.Udp {
 		s.Network = "tcp"
 	}
-	if p.Plugin != "" {
-		err := ssPlugin(p.PluginOpts, s, p.Plugin)
-		if err != nil {
-			return fmt.Errorf("ss: %w", err)
+	s.Obfs = p.Obfs
+	s.ProtocolParam = p.ProtocolParam
+	s.Protocol = p.Protocol
+	s.ObfsParam = p.ObfsParam
+
+	if p.Smux.Enabled {
+		s.Multiplex = &singbox.SingMultiplex{
+			Enabled:        true,
+			MaxConnections: max(p.Smux.MaxConnections, 4),
+			MinStreams:     p.Smux.MaxStreams,
+			MaxStreams:     max(p.Smux.MinStreams, 4),
+			Padding:        p.Smux.Padding,
+			Protocol:       p.Smux.Protocol,
 		}
 	}
-	return nil
+	if p.UdpOverTcp {
+		s.UdpOverTcp = &singbox.SingUdpOverTcp{Enabled: true}
+	}
+
+	if p.Plugin != "" {
+		if p.Plugin == "shadow-tls" {
+			sl, err := shadowTls(p, s)
+			if err != nil {
+				return nil, fmt.Errorf("ss: %w", err)
+			}
+			return sl, nil
+		}
+		err := ssPlugin(p.PluginOpts, s, p.Plugin)
+		if err != nil {
+			return nil, fmt.Errorf("ss: %w", err)
+		}
+	}
+	return []singbox.SingBoxOut{*s}, nil
 }
 
 type obfs struct {
@@ -39,6 +65,43 @@ func (o obfs) String() string {
 		sl = append(sl, "obfs-host="+backslashEscape(o.Host))
 	}
 	return strings.Join(sl, ";")
+}
+
+type shadowTlsPlugin struct {
+	Host     string `yaml:"host"`
+	Password string `yaml:"password"`
+	Version  int    `yaml:"version"`
+}
+
+func shadowTls(p *clash.Proxies, s *singbox.SingBoxOut) ([]singbox.SingBoxOut, error) {
+	v := shadowTlsPlugin{}
+	err := p.PluginOpts.Decode(&v)
+	if err != nil {
+		return nil, fmt.Errorf("shadowTls: %w", err)
+	}
+	ss := *s
+	ss.Server = ""
+	ss.ServerPort = 0
+	ss.Detour = s.Tag + "-shadowtls"
+
+	tlss := singbox.SingBoxOut{}
+	tlss.Type = "shadowtls"
+	tlss.Tag = ss.Detour
+	tlss.Server = s.Server
+	tlss.ServerPort = s.ServerPort
+	tlss.Version = v.Version
+	tlss.Password = v.Password
+	tlss.TLS = &singbox.SingTLS{
+		Enabled:    true,
+		ServerName: v.Host,
+	}
+	if p.ClientFingerprint != "" {
+		tlss.TLS.Utls = &singbox.SingUtls{
+			Enabled:     true,
+			Fingerprint: p.ClientFingerprint,
+		}
+	}
+	return []singbox.SingBoxOut{ss, tlss}, nil
 }
 
 type v2rayPlugin struct {

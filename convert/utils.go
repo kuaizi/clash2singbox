@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/xmdhs/clash2singbox/clash"
-	"github.com/xmdhs/clash2singbox/singbox"
+	"github.com/xmdhs/clash2singbox/model/clash"
+	"github.com/xmdhs/clash2singbox/model/singbox"
 )
 
 func filter(isinclude bool, reg string, sl []string) []string {
@@ -52,7 +52,7 @@ func getServers(s []singbox.SingBoxOut) []string {
 func getTags(s []singbox.SingBoxOut) []string {
 	return getForList(s, func(v singbox.SingBoxOut) (string, bool) {
 		tag := v.Tag
-		if tag == "" {
+		if tag == "" || v.Type == "shadowtls" {
 			return "", false
 		}
 		return tag, true

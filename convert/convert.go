@@ -5,54 +5,67 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/xmdhs/clash2singbox/clash"
-	"github.com/xmdhs/clash2singbox/singbox"
+	"github.com/xmdhs/clash2singbox/model/clash"
+	"github.com/xmdhs/clash2singbox/model/singbox"
 )
+
+var convertMap = map[string]func(*clash.Proxies, *singbox.SingBoxOut) ([]singbox.SingBoxOut, error){
+	"vmess":        warpOldConver(vmess),
+	"vless":        warpOldConver(vless),
+	"shadowsocks":  ss,
+	"shadowsocksr": ss,
+	"trojan":       warpOldConver(trojan),
+	"http":         warpOldConver(httpOpts),
+	"socks":        warpOldConver(socks5),
+	"hysteria":     warpOldConver(hysteria),
+	"wireguard":    wireguard,
+}
+
+func warpOldConver(f func(*clash.Proxies, *singbox.SingBoxOut) error) func(*clash.Proxies, *singbox.SingBoxOut) ([]singbox.SingBoxOut, error) {
+	return func(c *clash.Proxies, p *singbox.SingBoxOut) ([]singbox.SingBoxOut, error) {
+		err := f(c, p)
+		return []singbox.SingBoxOut{*p}, err
+	}
+}
 
 func Clash2sing(c clash.Clash) ([]singbox.SingBoxOut, error) {
 	sl := make([]singbox.SingBoxOut, 0, len(c.Proxies)+1)
+	var jerr error
 	for _, v := range c.Proxies {
 		v := v
 		s, t, err := comm(&v)
 		if err != nil {
-			return nil, fmt.Errorf("clash2sing: %w", err)
+			jerr = errors.Join(jerr, err)
+			continue
 		}
-		switch t {
-		case "vmess":
-			err = vmess(&v, s)
-		case "shadowsocks":
-			err = ss(&v, s)
-		case "trojan":
-			err = trojan(&v, s)
-		case "http":
-			err = httpOpts(&v, s)
-		case "socks":
-			err = socks5(&v, s)
-		}
+		nsl, err := convertMap[t](&v, s)
 		if err != nil {
-			return nil, fmt.Errorf("clash2sing: %w", err)
+			jerr = errors.Join(jerr, err)
+			continue
 		}
-		sl = append(sl, *s)
+		sl = append(sl, nsl...)
 	}
-	return sl, nil
+	return sl, jerr
 }
 
 var ErrNotSupportType = errors.New("不支持的类型")
 
+var typeMap = map[string]string{
+	"ss":        "shadowsocks",
+	"ssr":       "shadowsocksr",
+	"vmess":     "vmess",
+	"vless":     "vless",
+	"trojan":    "trojan",
+	"socks5":    "socks",
+	"http":      "http",
+	"hysteria":  "hysteria",
+	"wireguard": "wireguard",
+}
+
 func comm(p *clash.Proxies) (*singbox.SingBoxOut, string, error) {
 	s := &singbox.SingBoxOut{}
-	switch p.Type {
-	case "ss":
-		s.Type = "shadowsocks"
-	case "vmess":
-		s.Type = "vmess"
-	case "trojan":
-		s.Type = "trojan"
-	case "socks5":
-		s.Type = "socks"
-	case "http":
-		s.Type = "http"
-	default:
+	s.Type = typeMap[p.Type]
+	if s.Type == "" {
 		return nil, "", fmt.Errorf("comm: %w", ErrNotSupportType)
 	}
 	s.Tag = p.Name

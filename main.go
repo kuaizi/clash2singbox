@@ -5,13 +5,14 @@ import (
 	_ "embed"
 	"errors"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"time"
 
-	"github.com/xmdhs/clash2singbox/clash"
 	"github.com/xmdhs/clash2singbox/convert"
 	"github.com/xmdhs/clash2singbox/httputils"
+	"github.com/xmdhs/clash2singbox/model/clash"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,38 +23,42 @@ var (
 	include  string
 	exclude  string
 	insecure bool
+	ignore   bool
 )
 
 //go:embed config.json.template
 var configByte []byte
 
 func init() {
-	flag.StringVar(&url, "url", "", "订阅地址")
+	flag.StringVar(&url, "url", "", "订阅地址，多个链接使用 | 分割")
 	flag.StringVar(&path, "i", "", "本地 clash 文件")
 	flag.StringVar(&outPath, "o", "config.json", "输出文件")
 	flag.StringVar(&include, "include", "", "urltest 选择的节点")
 	flag.StringVar(&exclude, "exclude", "", "urltest 排除的节点")
 	flag.BoolVar(&insecure, "insecure", false, "所有节点不验证证书")
+	flag.BoolVar(&ignore, "ignore", true, "忽略无法转换的节点")
 	flag.Parse()
 }
 
 func main() {
-	var b []byte
-	var err error
+	c := clash.Clash{}
 	if url != "" {
-		b, err = httputils.HttpGet(context.TODO(), &http.Client{Timeout: 10 * time.Second}, url)
+		var err error
+		c, err = httputils.GetClash(context.TODO(), &http.Client{Timeout: 10 * time.Second}, url)
+		if err != nil {
+			panic(err)
+		}
 	} else if path != "" {
-		b, err = os.ReadFile(path)
+		b, err := os.ReadFile(path)
+		if err != nil {
+			panic(err)
+		}
+		err = yaml.Unmarshal(b, &c)
+		if err != nil {
+			panic(err)
+		}
 	} else {
 		panic("url 和 i 参数不能都为空")
-	}
-	if err != nil {
-		panic(err)
-	}
-	c := clash.Clash{}
-	err = yaml.Unmarshal(b, &c)
-	if err != nil {
-		panic(err)
 	}
 
 	if insecure {
@@ -62,7 +67,7 @@ func main() {
 
 	s, err := convert.Clash2sing(c)
 	if err != nil {
-		panic(err)
+		fmt.Println(err)
 	}
 	outb, err := os.ReadFile(outPath)
 	if err != nil {

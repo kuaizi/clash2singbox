@@ -3,8 +3,8 @@ package convert
 import (
 	"fmt"
 
-	"github.com/xmdhs/clash2singbox/clash"
-	"github.com/xmdhs/clash2singbox/singbox"
+	"github.com/xmdhs/clash2singbox/model/clash"
+	"github.com/xmdhs/clash2singbox/model/singbox"
 )
 
 func tls(p *clash.Proxies, s *singbox.SingBoxOut) {
@@ -17,6 +17,15 @@ func tls(p *clash.Proxies, s *singbox.SingBoxOut) {
 			s.TLS.ServerName = p.Sni
 		} else {
 			s.TLS.ServerName = p.Server
+		}
+		if p.Fingerprint != "" || p.ClientFingerprint != "" {
+			s.TLS.Utls = &singbox.SingUtls{}
+			s.TLS.Utls.Enabled = true
+			if p.ClientFingerprint != "" {
+				s.TLS.Utls.Fingerprint = p.ClientFingerprint
+			} else {
+				s.TLS.Utls.Fingerprint = p.Fingerprint
+			}
 		}
 		s.TLS.Insecure = p.SkipCertVerify
 	}
@@ -42,11 +51,42 @@ func vmess(p *clash.Proxies, s *singbox.SingBoxOut) error {
 		return nil
 	}
 	if p.H2Opts.Path != "" || p.Network == "h2" {
-		err := vmessHttpOpts(p, s)
+		err := vmessHttp2Opts(p, s)
 		if err != nil {
 			return fmt.Errorf("vmess: %w", err)
 		}
 		return nil
+	}
+	if p.HTTPOpts.Method != "" {
+		err := vmessHttpOpts(p, s)
+		if err != nil {
+			return fmt.Errorf("vmess: %w", err)
+		}
+	}
+	return nil
+}
+
+func vless(p *clash.Proxies, s *singbox.SingBoxOut) error {
+	err := vmess(p, s)
+	if err != nil {
+		return fmt.Errorf("vless: %w", err)
+	}
+	s.Security = ""
+	s.PacketEncoding = "xudp"
+	if p.PacketEncoding != "" {
+		s.PacketEncoding = p.PacketEncoding
+	}
+	if p.Network != "ws" && len(p.Flow) >= 16 {
+		if p.Flow != "" && p.Flow != "xtls-rprx-vision" {
+			return fmt.Errorf("vless: Flow %w", ErrNotSupportType)
+		}
+		s.Flow = p.Flow
+	}
+	if p.RealityOpts.ShortId != "" {
+		s.TLS.Reality = &singbox.SingReality{}
+		s.TLS.Reality.Enabled = true
+		s.TLS.Reality.PublicKey = p.RealityOpts.PublicKey
+		s.TLS.Reality.ShortID = p.RealityOpts.ShortId
 	}
 	return nil
 }
@@ -56,7 +96,11 @@ func vmessWsOpts(p *clash.Proxies, s *singbox.SingBoxOut) error {
 		s.Transport = &singbox.SingTransport{}
 	}
 	s.Transport.Type = "ws"
-	s.Transport.Headers = p.WsOpts.Headers
+	m := map[string][]string{}
+	for k, v := range p.WsOpts.Headers {
+		m[k] = []string{v}
+	}
+	s.Transport.Headers = m
 	s.Transport.Path = p.WsOpts.Path
 	s.Transport.EarlyDataHeaderName = p.WsOpts.EarlyDataHeaderName
 	s.Transport.MaxEarlyData = p.WsOpts.MaxEarlyData
@@ -72,13 +116,27 @@ func vmessGrpcOpts(p *clash.Proxies, s *singbox.SingBoxOut) error {
 	return nil
 }
 
-func vmessHttpOpts(p *clash.Proxies, s *singbox.SingBoxOut) error {
+func vmessHttp2Opts(p *clash.Proxies, s *singbox.SingBoxOut) error {
 	if s.Transport == nil {
 		s.Transport = &singbox.SingTransport{}
 	}
 	s.Transport.Type = "http"
 	s.Transport.Host = p.H2Opts.Host
 	s.Transport.Path = p.H2Opts.Path
+	return nil
+}
+
+func vmessHttpOpts(p *clash.Proxies, s *singbox.SingBoxOut) error {
+	if s.Transport == nil {
+		s.Transport = &singbox.SingTransport{}
+	}
+	s.Transport.Type = "http"
+	s.Transport.Host = p.HTTPOpts.Headers["Host"]
+	if len(p.HTTPOpts.Path) > 0 {
+		s.Transport.Path = p.HTTPOpts.Path[0]
+	}
+	s.Transport.Method = p.HTTPOpts.Method
+	s.Transport.Headers = p.HTTPOpts.Headers
 	return nil
 }
 
