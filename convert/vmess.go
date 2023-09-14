@@ -28,6 +28,7 @@ func tls(p *clash.Proxies, s *singbox.SingBoxOut) {
 			}
 		}
 		s.TLS.Insecure = p.SkipCertVerify
+		s.TLS.Alpn = p.Alpn
 	}
 }
 
@@ -82,8 +83,13 @@ func vless(p *clash.Proxies, s *singbox.SingBoxOut) error {
 		}
 		s.Flow = p.Flow
 	}
-	if p.RealityOpts.ShortId != "" {
-		s.TLS.Reality = &singbox.SingReality{}
+	if p.RealityOpts.PublicKey != "" {
+		if s.TLS == nil {
+			s.TLS = &singbox.SingTLS{}
+		}
+		if s.TLS.Reality == nil {
+			s.TLS.Reality = &singbox.SingReality{}
+		}
 		s.TLS.Reality.Enabled = true
 		s.TLS.Reality.PublicKey = p.RealityOpts.PublicKey
 		s.TLS.Reality.ShortID = p.RealityOpts.ShortId
@@ -141,16 +147,8 @@ func vmessHttpOpts(p *clash.Proxies, s *singbox.SingBoxOut) error {
 }
 
 func trojan(p *clash.Proxies, s *singbox.SingBoxOut) error {
-	if s.TLS == nil {
-		s.TLS = &singbox.SingTLS{}
-	}
-	if p.Sni != "" {
-		s.TLS.ServerName = p.Sni
-	} else {
-		s.TLS.ServerName = p.Server
-	}
-	s.TLS.Insecure = p.SkipCertVerify
-	s.TLS.Enabled = true
+	p.Tls = true
+	tls(p, s)
 	if p.WsOpts.Path != "" || p.Network == "ws" {
 		err := vmessWsOpts(p, s)
 		if err != nil {
@@ -163,6 +161,5 @@ func trojan(p *clash.Proxies, s *singbox.SingBoxOut) error {
 			return fmt.Errorf("trojan: %w", err)
 		}
 	}
-	s.TLS.Alpn = p.Alpn
 	return nil
 }
